@@ -1,0 +1,206 @@
+<?php
+/**
+ * @file
+ * Advanced contact form module file.
+ * Dalay - http://www.lipinart.ru
+ */
+ 
+/**
+ * Add requrement files: JS.
+ */
+function contactor_init(){
+    drupal_add_library('system', 'drupal.ajax');
+    drupal_add_js(drupal_get_path('module', 'contactor') . '/contactor.js');
+}
+
+/**
+ *  Implementation of hook_menu()
+ */
+function contactor_menu() {
+  $items = array();
+
+  $items['send/%'] = array(
+    'title' => 'Написать нам',
+    'page callback' => 'contactor_ajax_callback',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'delivery callback' => 'ajax_deliver',
+  );
+  $items['send'] = array(
+    'title' => 'Написать нам',
+    'page callback' => 'contactor_get_form',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+  );
+  return $items;
+}
+/**
+ * Page callback
+ */
+function contactor_get_form() {
+  $form = drupal_get_form('contactor_form');
+  $form = drupal_render($form);
+  return $form;
+}
+/**
+ * Ajax link callback
+ */
+function contactor_ajax_callback($mode = NULL){
+    if ($mode != 'ajax') {
+        drupal_set_message('Turn Javascript');
+        drupal_goto('send');
+    }
+
+    $commands = array();
+    $commands[] = ajax_command_invoke('#modal-form', 'modal', array('show'));
+    $commands[] = ajax_command_html('.modal-header > h4', 'Написать нам');
+    $commands[] = ajax_command_html('.modal-body > .ajax-target', contactor_get_form());
+    
+    return array('#type' => 'ajax', '#commands' => $commands);
+}
+
+ /**
+ * Build entry form
+ */
+function contactor_form($form, $form_state){
+
+    $items = array();
+    $items['text'] = array(
+    	'#type' => 'textarea',
+      '#title' => 'Текст сообщения',
+      '#description' => '',
+      '#rows' => 4,
+      '#attributes' => array(
+      	'class' => array('form-control'),
+        ),
+    );
+    $items['email'] = array(
+     	'#type' => 'textfield',
+      '#title' => t('Your Email'),
+      '#maxlength' => 25,
+      '#required' => TRUE,
+    );
+    $items['agreement'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Настоящим Вы даете согласие на обработку своих персональных данных в порядке, установленном Федеральным Законом от 27.07.2006 №152-ФЗ "О персональных данных"'),
+      '#required' => TRUE,
+    );
+    $items['submit'] = array(
+     	'#prefix' =>'<div class="form-actions">',
+        '#type' => 'submit',
+        '#value' => t('Send'),
+        '#ajax' => array(
+	        'callback' => 'contactor_form_callback',
+            'progress' => '',
+		),
+        '#suffix' =>'<a href="#" class="btn btn-link" data-dismiss="modal">' . t('Cancel') . '</a></div>',
+        
+    );    
+     return $items;
+ }
+
+/**
+ * Implementation of hook_form_validate()
+ */
+function contactor_form_validate($form, $form_state) {
+  if (!valid_email_address($form_state['values']['email'])) {
+    form_set_error('email', 'Некорректно указан email.');
+  }
+}
+/**
+ * Implementation of hook_form_submit()
+ */
+function contactor_form_submit($form, $form_state) {  
+  if (!form_get_errors()) {
+    global $user;  
+ 
+    $form_state['rebuild'] = TRUE;
+    drupal_set_message('<h4>Ваше сообщение отправлено.</h4><p>Ваше сообщение будет рассмотрено в течение часа.<p>');
+
+    $from = variable_get('site_mail');
+    drupal_mail('system', 'mail', $from, language_default(), array(
+      'context' => array(
+          'subject' => 'Сообщение с сайта',
+            'message' => $form_state['values']['text'] . "\n От:" . $form_state['values']['email'],
+        )
+    ));
+  }
+  return $form;
+} 
+  /**
+ * Ajax callback function.
+ */
+function contactor_form_callback($form, $form_state) { //, $js = NULL
+    
+    $commands = array();
+    if (!empty($form_state['executed']) && !form_get_errors()) {
+        $commands[] = ajax_command_html('#modal-form .modal-title', 'Сообщение отправлено!');
+    	$commands[] = ajax_command_html('#modal-form .ajax-messages', theme('status_messages'));
+        $commands[] = ajax_command_html('#modal-form .ajax-target', '');
+    } else {
+        $commands[] = ajax_command_html('#modal-form .ajax-messages', theme('status_messages'));
+        $commands[] = ajax_command_html('#modal-form .ajax-target', drupal_render($form));
+    }
+    return array('#type' => 'ajax', '#commands' => $commands);  
+}
+/**
+ * Implements hook_block_info().
+ */
+function contactor_block_info() {
+    $blocks['adf'] = array(
+    	'info' => t('Contact block'),
+        'cache' => DRUPAL_CACHE_PER_ROLE,
+    );
+    return $blocks;
+}
+/**
+ * Implements hook_block_configure().
+ */
+function contactor_block_configure($delta = '') {
+  // This example comes from node.module.
+  $form = array();
+  
+  if ($delta == 'contactor') {
+      $form['block_text'] = array(
+      	'#type' => 'textarea',
+        '#format' => 'full_html',
+        '#title' => t('Enter contact information.'),
+        '#default_value' => variable_get('block_text'),
+      );
+  }
+  return $form;
+}
+/**
+ * Implements hook_block_view().
+ */
+function contactor_block_view($delta=''){
+    $block = array();
+    if($delta =='contactor'){
+        $block['subject'] = '';
+        $block['content'] = '<div id="contacts" class="well">';
+        $block['content'] .= '<h2 class="page-header">Контакты</h2>';
+        $block['content'] .= '<address class="address">' . variable_get('block_text') . '</address>';
+        $block['content'] .= '<div class="more-link">' . l('Написать нам', 'send/nojs', array('attributes' => array('class' => array('btn btn-default btn-block use-ajax'), 'title' => 'Написать нам сообщение'))) . '</div>';
+        $block['content'] .= '</div>';
+        
+        // add libryaries
+        drupal_add_library('system', 'drupal.ajax');
+        drupal_add_library('system', 'jquery.form');;
+    }
+    return $block;
+}
+/**
+ * Implements hook_block_save().
+ */
+function contactor_block_save($delta = '', $edit = array()) {
+  // This example comes from node.module.
+  if ($delta == 'contactor') {
+      variable_set('block_text', $edit['block_text']);
+  }
+}
+
+
+
+
+
+ 
